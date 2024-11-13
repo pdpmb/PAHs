@@ -1,0 +1,158 @@
+rm(list = ls())
+setwd("/Users/chaochen/Desktop/BAP")
+load(file = "expr_last1_bactch.Rdata")
+ls()
+
+#BiocManager::install('limma')  #安装不上时，用devtools::
+#BiocManager::install("gplots")
+
+#install.packages("devtools")
+#devtools::install_github("gangwug/limma")
+library("limma")
+library("gplots")
+library("edgeR")
+
+#不知道对不对 https://blog.csdn.net/xupeng456/article/details/89195852
+
+
+##https://zhuanlan.zhihu.com/p/437604274
+#https://github.com/ShixiangWang/self-study/discussions/59
+
+
+#########################替换方法#################################
+group_list<-group_factor
+exprSet<-expr_last1_bactch
+design <- model.matrix(~0+factor(group_list))
+design
+colnames(design)=levels(factor(group_list))
+rownames(design)=colnames(exprSet)
+design
+# 实验设计矩阵的每一行对应一个样品的编码，
+# 每一列对应样品的一个特征。这里只考虑了一个因素两个水平，
+# 如果是多因素和多水平的实验设计，会产生更多的特征，需要参考文档设计。
+# 构建对比模型，比较两个实验条件下表达数据
+contrast.matrix<-makeContrasts(AD-CTL,levels = design)
+contrast.matrix ##这个矩阵声明，我们要把G3组跟con组进行差异分析比较
+
+#https://www.jieandze1314.com/post/cnposts/156/   比较矩阵
+
+##### 差异分析
+##step1 线性模型拟合
+fit <- lmFit(exprSet,design)
+##step2 根据对比模型进行差值计算 
+fit2 <- contrasts.fit(fit, contrast.matrix) 
+##step3 贝叶斯检验
+fit2 <- eBayes(fit2) 
+##step4 生成所有基因的检验结果报告
+tempOutput = topTable(fit2, coef=1, n=Inf)
+write.csv(tempOutput,"tempOutput.csv")
+##step5 用P.Value进行筛选，得到全部差异表达基因
+head(tempOutput)
+dif <- tempOutput[tempOutput[, "adj.P.Val"]<0.05,]
+
+dif["WNT10B",]
+dif["SYT5",]
+# 显示一部分报告结果
+head(dif)
+sum(tempOutput$adj.P.Val<0.05)
+DEprobe_ID2<-subset(tempOutput,tempOutput$adj.P.Val<0.05)
+dim(DEprobe_ID2)
+DEprobe_ID2
+
+#做个表，把output基因换ID后输出。
+
+#开始做图
+library(EnhancedVolcano)
+library(ggplot2)
+library(ggrepel)
+
+## 我们使用|logFC| > 0.5，padj < 0.05（矫正后P值）
+foldChange = 0.07
+padj = 0.001
+
+#foldChange = 0.15  
+#用于给出HMMR
+
+## 筛选出所有差异基因的结果
+All_diffSig <- tempOutput[(tempOutput$adj.P.Val < padj & (tempOutput$logFC>foldChange | tempOutput$logFC < (-foldChange))),]
+All_diffSig
+
+dim(All_diffSig)
+
+All_diffSig<-All_diffSig[order(All_diffSig$logFC),]
+
+dim(subset(All_diffSig,logFC>0))
+dim(subset(All_diffSig,logFC<0))
+
+write.csv(All_diffSig,"tempAD_All_diffSig.csv")
+
+AD_relatedgene<-list("APP", "PSEN1", "PSEN2",  "APOE", "MAPT","SORL1","TREM2","EGFR")
+for (i in AD_relatedgene) { 
+  print(All_diffSig[i,])
+} 
+
+AD_relatedgene<-list("APP", "PSEN1", "PSEN2",  "APOE", "MAPT","SORL1","TREM2","EGFR")
+for (i in AD_relatedgene) { 
+  print(tempOutput[i,])
+} 
+
+
+All_diffSig["APOE",]
+
+
+log2(1.2)
+# FCN3 C1QA
+EnhancedVolcano(tempOutput,
+                lab = rownames(tempOutput),
+                labSize = 4,
+                x = 'logFC',  #列名
+                y = 'adj.P.Val', #列名
+                xlim = c(-1.2, 1.1),
+                ylim = c(0,100),
+                title = 'CTL versus AD',
+                pCutoff = padj,
+                FCcutoff = foldChange,
+                #colAlpha = 0.6,
+                legendLabSize = 10.0,
+                legendIconSize = 3.0,
+                pointSize = 1.0, gridlines.major = FALSE,
+                gridlines.minor = FALSE
+)
+
+#绘制热图
+
+##### 下 测试
+
+
+
+
+##### 上 测试
+
+
+
+library(pheatmap)
+diffSig<-rownames(All_diffSig)
+length(diffSig)
+#match：匹配两个向量，返回第后面的下标值。
+mapexp<-expr_last1_bactch[match(diffSig,rownames(expr_last1_bactch)),]
+dim(mapexp)
+length(group_factor)
+
+annotation_col = data.frame(
+  GROUP = group_factor
+)
+rownames(annotation_col) = colnames(mapexp)
+#annotation_col
+
+rownames(annotation_col)
+dim(annotation_col)
+pheatmap(mapexp, 
+         #legend_breaks = c(-7:7),
+         scale = "row",
+         show_rownames=F,show_colnames=F,
+         annotation_col = annotation_col,
+         color = colorRampPalette(c("blue", "white", "red"))(1000)
+         
+)
+
+save(group_factor,expr_last1_bactch, All_diffSig,file = "DEexpressgenesetAD.Rdata")
