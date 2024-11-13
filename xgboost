@@ -1,0 +1,385 @@
+
+rm(list = ls())
+setwd("/Users/chaochen/Desktop/BAP")
+library(dplyr)
+load(file ="dat_factor1.rda")
+load(file ="dat_factor2.rda")
+load(file ="dat_factor3.rda")
+load(file ="dat_factor4.rda")
+load(file ="dat_factor5.rda")
+load(file ="dat_factor8.rda")
+load(file="expr_last1_bactch.Rdata")
+load(file="xgbfit.RData")
+ls()
+
+
+dim(dat_factor1)
+dim(dat_factor8)
+
+network_145<-read.csv("/Users/chaochen/Desktop/BAPfig/network_145_genes.csv",header = FALSE)
+######################################计算另外的，如1号
+dat_factor1[,dim(dat_factor1)[2]]
+tail(colnames(dat_factor1))
+dat_factor1[1:3, 1:4]  #exp_group_factor
+names(dat_factor1)[names(dat_factor1) =="exp_group_factor"] <- "group_factor"
+tail(names(dat_factor1))
+
+dat_factor11<-dat_factor1[,na.omit(match(network_145$V1,colnames(dat_factor1)))]
+
+dat_factor11
+dim(dat_factor11)
+
+dat_factor11$group_factor<- ifelse(dat_factor1$group_factor == "CTL", 0, 1)
+
+dat_factor1$group_factor
+
+dat_factor11$group_factor
+
+table(dat_factor11$group_factor)
+
+
+exp_xg<-as.data.frame(dat_factor11)
+exp_xg$group_factor
+exp_xg[1:3, 1:4]
+exp_xg[,"group_factor"]
+#######################记得改factor_xg里面的值
+
+#https://zhuanlan.zhihu.com/p/354216711
+#划分训练数据，测试数据
+set.seed(1)
+library(xgboost)
+library(MASS)
+
+pima <-as.matrix(exp_xg)    #数据植入
+set.seed(502)
+ind <- sample(2, nrow(pima), replace = TRUE, prob = c(0.7, 0.3))
+pima.train <- pima[ind == 1, ]#训练数据
+pima.test <- pima[ind == 2, ]#测试数据
+
+
+dim(pima)
+dim(pima.train)
+dim(pima.test)
+
+
+#设置网格参数
+#通过expand.grid函数设置模型的网格参数https://juejin.cn/post/6844903661013827598
+grid = expand.grid(
+  nrounds = c(75, 100),#最大迭代次数(最终模型中树的数量)
+  colsample_bytree = 1,#建立树时随机抽取的特征数量，用比率表示,默认为1（使用100%特征）
+  min_child_weight = 1,#对树进行提升时使用的最小权重,默认为1
+  eta = c(0.01, 0.1, 0.3), #学习率，默认为0.3
+  gamma = c(0.5, 0.25),#在树中新增一个叶子分区时所需的最小减损
+  subsample = 0.5,#子样本数据占整个观测的比例，默认值为1（100%）
+  max_depth = c(2, 3,5)#单个树的最大深度 #改动了下
+)
+grid
+
+#使用caret包的trainControl函数定义5折交叉验证
+library(caret)
+cntrl = trainControl(
+  method = "cv",
+  number = 5,
+  #repeats=10,  #后来增加的。`repeats` has no meaning for this resampling method. 
+  verboseIter = TRUE,
+  returnData = FALSE,
+  returnResamp = "final"                                                      
+)
+
+#使用caret包的train训练
+dim(pima)
+pima[,146]
+
+train.xgb = train(
+  x = pima.train[, 1:145],#训练集中的前7列#注意改参数
+  y = pima.train[, 146],#训练集中的第8列  #注意改参数
+  trControl = cntrl,#设置交叉验证
+  tuneGrid = grid,#网格参数
+  method = "xgbTree",
+  verbosity = 0 # verbosity = 0 which will be passed on by caret::train to the xgboost call:
+)
+
+train.xgb
+#   0.10  2          0.50    75      0.4104225  0.3343465  0.3439072
+#https://zhuanlan.zhihu.com/p/66890032
+#将最佳参数放在list对象中 # 这里怎么搞？ 
+param <- list(  objective           = "binary:logistic",   #“reg:linear” –linear regression：回归
+                booster             = "gbtree",
+                eval_metric         = "error", #   “error”:分类任务
+                eta                 = 0.1, 
+                max_depth           = 2,  #树的最大深度，值越大，树越复杂。
+                subsample           = 0.5,
+                colsample_bytree    = 1,
+                gamma               = 0.5,#最小损失函数下降值。
+                min_child_weight    =1,
+                nthread=30,
+                scale_pos_weight=1   #每次都要调下，前面除后面()
+)
+
+
+
+#将训练数据转为xgb.train用的类型
+x <- as.matrix(pima.train[, 1:145])   #    注意参数更改
+
+y = as.matrix(pima.train[, 146])
+
+
+#xgb.DMatrix函数处理数据，将矩阵和标号列表组合成符合要求的输入
+train.mat <- xgb.DMatrix(data = x, 
+                         label = y)
+
+set.seed(1)
+#xgb.train函数训练模型，data为包含输入数据和标记数据，nrounds迭代次数
+xgb.fit <- xgb.train(params = param, data = train.mat, nrounds = 75)  #参数要修改
+xgb.fit
+
+#predict函数第一个参数为模型，第二个参数为要验证的数据，此处为输入矩阵
+pred <- predict(xgb.fit, x)
+str(pred)
+impMatrix <- xgb.importance(feature_names = dimnames(x)[[2]], model = xgb.fit)
+impMatrix
+
+write.csv(impMatrix,"temp_impMatrix1.csv")
+#画出变量重要性图,impMatrix为重要特征矩阵
+xgb.plot.importance(impMatrix[1:5,], main = "Gain by Feature")
+
+##画出ROC曲线
+
+#InformationValue包的plotROC函数绘制ROC曲线图
+library(InformationValue)
+plotROC(y,pred)
+
+class(pred)
+print(pred)
+print(y)
+###############
+
+###########重新做pred 好像出来了
+x_test <- as.matrix(pima.test[, 1:145])   #    注意参数更改
+
+y_test <- as.matrix(pima.test[, 146])
+#y_test <- ifelse(pima.test$factor_xg == "ctl", 0, 1)
+
+
+pred_test <- predict(xgb.fit, x_test)
+######
+
+
+yTest<-y_test
+yPred<-pred_test
+
+plotROC(y_test,pred_test)
+
+str(y_test)
+str(pred_test)
+######
+library(pROC)
+xgboost_roc <- roc(y_test,pred_test, direction='<')
+
+#绘制ROC曲线和AUC值
+#cairo_pdf("test_roc.pdf", width = 9, height = 7)
+plot(xgboost_roc, print.auc=TRUE, auc.polygon=TRUE, 
+     #grid=c(0.1, 0.2),grid.col=c("green", "red"), 
+     max.auc.polygon=TRUE,auc.polygon.col="skyblue", 
+     print.thres=TRUE,
+     #main='xgboost model ROC curve', 
+     axes=FALSE)
+axis(2,pos=1)
+axis(1,pos=0)
+
+#模型稳定性
+#CALCULATION MEAN SQUARE ERROR
+mean_square_error = mean((yTest - yPred)^2)
+
+#CALCULATING MEAN ABSOLUTE ERROE
+mean_absolute_error = caret::MAE(yTest, yPred)
+
+#CALCULATING ROOT MEAN SQUARE ERRO
+root_mean_square_error = caret::RMSE(yTest, yPred)  #root mean square error
+
+#PRINTING THE EVALUATION METHOD RESULT
+cat("Mean Square Error is: ", mean_square_error, "Mean Absolute Error is: ", mean_absolute_error,
+    "Root Mean Square Error is: ", root_mean_square_error )
+
+
+
+
+    ######################################计算另外的，如2号
+    dat_factor8[,dim(dat_factor8)[2]]
+    tail(colnames(dat_factor8))
+    dat_factor8[1:3, 1:4]  #exp_group_factor
+    names(dat_factor8)[names(dat_factor8) =="exp_group_factor"] <- "group_factor"
+    tail(names(dat_factor8))
+    
+    dat_factor88<-dat_factor8[,na.omit(match(network_145$V1,colnames(dat_factor8)))]
+    
+    dat_factor88
+    dim(dat_factor88)
+    
+    dat_factor88$group_factor<- ifelse(dat_factor8$group_factor == "CTL", 0, 1)
+  
+    
+    dat_factor88$group_factor
+    
+    table(dat_factor88$group_factor)
+    54/121
+    
+    exp_xg<-as.data.frame(dat_factor88)
+    exp_xg$group_factor
+    exp_xg[1:3, 1:4]
+    exp_xg[,"group_factor"]
+    #######################记得改factor_xg里面的值
+    
+    #https://zhuanlan.zhihu.com/p/354216711
+    #划分训练数据，测试数据
+    set.seed(1)
+    library(xgboost)
+    library(MASS)
+    
+    pima <-as.matrix(exp_xg)    #数据植入
+    set.seed(502)
+    ind <- sample(2, nrow(pima), replace = TRUE, prob = c(0.7, 0.3))
+    pima.train <- pima[ind == 1, ]#训练数据
+    pima.test <- pima[ind == 2, ]#测试数据
+    
+    
+    dim(pima)
+    dim(pima.train)
+    dim(pima.test)
+    
+    
+    #设置网格参数
+    #通过expand.grid函数设置模型的网格参数https://juejin.cn/post/6844903661013827598
+    grid = expand.grid(
+      nrounds = c(75, 100),#最大迭代次数(最终模型中树的数量)
+      colsample_bytree = 1,#建立树时随机抽取的特征数量，用比率表示,默认为1（使用100%特征）
+      min_child_weight = 1,#对树进行提升时使用的最小权重,默认为1
+      eta = c(0.01, 0.1, 0.3), #学习率，默认为0.3
+      gamma = c(0.5, 0.25),#在树中新增一个叶子分区时所需的最小减损
+      subsample = 0.5,#子样本数据占整个观测的比例，默认值为1（100%）
+      max_depth = c(2, 3,5)#单个树的最大深度 #改动了下
+    )
+    grid
+    
+    #使用caret包的trainControl函数定义5折交叉验证
+    library(caret)
+    cntrl = trainControl(
+      method = "cv",
+      number = 5,
+      #repeats=10,  #后来增加的。`repeats` has no meaning for this resampling method. 
+      verboseIter = TRUE,
+      returnData = FALSE,
+      returnResamp = "final"                                                      
+    )
+    
+    #使用caret包的train训练
+    dim(pima)
+    pima[,146]
+    
+    train.xgb = train(
+      x = pima.train[, 1:145],#训练集中的前7列#注意改参数
+      y = pima.train[, 146],#训练集中的第8列  #注意改参数
+      trControl = cntrl,#设置交叉验证
+      tuneGrid = grid,#网格参数
+      method = "xgbTree",
+      verbosity = 0 # verbosity = 0 which will be passed on by caret::train to the xgboost call:
+    )
+    
+    train.xgb
+    #   0.10  2          0.25   100      0.3429710  0.4830449  0.2783633
+    #https://zhuanlan.zhihu.com/p/66890032
+    #将最佳参数放在list对象中 # 这里怎么搞？ 
+    param <- list(  objective           = "binary:logistic",   #“reg:linear” –linear regression：回归
+                    booster             = "gbtree",
+                    eval_metric         = "error", #   “error”:分类任务
+                    eta                 = 0.1, 
+                    max_depth           = 2,  #树的最大深度，值越大，树越复杂。
+                    subsample           = 0.5,
+                    colsample_bytree    = 1,
+                    gamma               = 0.25,#最小损失函数下降值。
+                    min_child_weight    =1,
+                    nthread=30,
+                    scale_pos_weight=0.446281
+    )
+    
+    
+    
+    #将训练数据转为xgb.train用的类型
+    x <- as.matrix(pima.train[, 1:145])   #    注意参数更改
+    
+    y = as.matrix(pima.train[, 146])
+    
+    
+    #xgb.DMatrix函数处理数据，将矩阵和标号列表组合成符合要求的输入
+    train.mat <- xgb.DMatrix(data = x, 
+                             label = y)
+    
+    set.seed(1)
+    #xgb.train函数训练模型，data为包含输入数据和标记数据，nrounds迭代次数
+    xgb.fit <- xgb.train(params = param, data = train.mat, nrounds = 100)  #参数要修改
+    xgb.fit
+    
+    #predict函数第一个参数为模型，第二个参数为要验证的数据，此处为输入矩阵
+    pred <- predict(xgb.fit, x)
+    str(pred)
+    impMatrix <- xgb.importance(feature_names = dimnames(x)[[2]], model = xgb.fit)
+    impMatrix
+    
+    write.csv(impMatrix,"temp_impMatrix8.csv")
+    #画出变量重要性图,impMatrix为重要特征矩阵
+    xgb.plot.importance(impMatrix[1:5,], main = "Gain by Feature")
+    
+    ##画出ROC曲线
+    
+    #InformationValue包的plotROC函数绘制ROC曲线图
+    library(InformationValue)
+    plotROC(y,pred)
+    
+    class(pred)
+    print(pred)
+    print(y)
+    ###############
+    
+    ###########重新做pred 好像出来了
+    x_test <- as.matrix(pima.test[, 1:145])   #    注意参数更改
+    
+    y_test <- as.matrix(pima.test[, 146])
+    #y_test <- ifelse(pima.test$factor_xg == "ctl", 0, 1)
+    
+    
+    pred_test <- predict(xgb.fit, x_test)
+    
+    yTest<-y_test
+    yPred<-pred_test
+    
+    plotROC(y_test,pred_test)
+    
+    str(y_test)
+    str(pred_test)
+    ######
+    library(pROC)
+    xgboost_roc <- roc(y_test,pred_test, direction='<')
+    #绘制ROC曲线和AUC值
+    #cairo_pdf("test_roc.pdf", width = 9, height = 7)
+    plot(xgboost_roc, print.auc=TRUE, auc.polygon=TRUE, 
+         #grid=c(0.1, 0.2),grid.col=c("green", "red"), 
+         max.auc.polygon=TRUE,auc.polygon.col="skyblue", 
+         print.thres=TRUE,
+         #main='xgboost model ROC curve', 
+         axes=FALSE)
+    axis(2,pos=1)
+    axis(1,pos=0)
+    
+    #模型稳定性
+    #CALCULATION MEAN SQUARE ERROR
+    mean_square_error = mean((yTest - yPred)^2)
+    
+    #CALCULATING MEAN ABSOLUTE ERROE
+    mean_absolute_error = caret::MAE(yTest, yPred)
+    
+    #CALCULATING ROOT MEAN SQUARE ERRO
+    root_mean_square_error = caret::RMSE(yTest, yPred)  #root mean square error
+    
+    #PRINTING THE EVALUATION METHOD RESULT
+    cat("Mean Square Error is: ", mean_square_error, "Mean Absolute Error is: ", mean_absolute_error,
+        "Root Mean Square Error is: ", root_mean_square_error )
