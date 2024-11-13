@@ -1,0 +1,67 @@
+import rdkit.Chem as Chem
+import pandas as pd
+#https://github.com/dockstring/dockstring/blob/main/tutorials/1_docking_risperidone_against_DRD2.ipynb
+PAHs_list=["C1=CC=C2C3=C4C(=CC2=C1)C=CC5=C4C(=CC=C5)C=C3",
+"C1=CC=C2C(=C1)C=CC3=CC=CC=C32",
+"C1=CC=C2C(=C1)C3=CC=CC4=C3C2=CC=C4",
+"C1=CC2=C3C(=C1)C=CC4=CC=CC(=C43)C=C2",
+"C1=CC=C2C=CC=CC2=C1",
+"C1=CC2=C3C(=C1)C=CC3=CC=C2",
+"C1CC2=CC=CC3=C2C1=CC=C3",
+"C1C2=CC=CC=C2C3=CC=CC=C31",
+"C1=CC=C2C=C3C=CC=CC3=CC2=C1",
+"C1=CC=C2C(=C1)C=CC3=CC4=CC=CC=C4C=C32",
+"C1=CC=C2C(=C1)C=CC3=C2C=CC4=CC=CC=C43",
+"C1=CC=C2C3=C4C(=CC=C3)C5=CC=CC=C5C4=CC2=C1",
+"C1=CC=C2C=C3C4=CC=CC5=C4C(=CC=C5)C3=CC2=C1",
+"C1=CC=C2C(=C1)C3=C4C2=CC5=CC=CC6=C5C4=C(C=C6)C=C3",
+"C1=CC=C2C(=C1)C=CC3=CC4=C(C=CC5=CC=CC=C54)C=C32",
+"C1=CC2=C3C(=C1)C4=CC=CC5=C4C6=C(C=C5)C=CC(=C36)C=C2"]
+#13-5 -7-8 1-16.排序，为了文章好写。
+target_result = []
+myprotein=["1aap","1bzc","1m47","3v4p","1uk0","1d4a","1tnf","2okk","7zub_ahr"]
+array_length_P = len(myprotein)
+for j in range(array_length_P):
+#for j in range(3):
+    print(myprotein[j])
+    #target_result.append(myprotein[j])
+
+    #target_protein.
+    array_length = len(PAHs_list)
+    for i in range(array_length):
+    #for i in range(3):
+        smiles = PAHs_list[i]
+        print(smiles)
+        #smiles='C1[C@@H]([C@H](OC2=CC(=CC(=C21)O)O)C3=CC(=C(C=C3)O)O)O' #catechin
+        Chem.MolFromSmiles(smiles)
+        #img = Draw.MolsToGridImage([mol], molsPerRow=1, subImgSize=(200, 200))
+        #img.save("/Users/chaochen/Downloads//2.png")
+        from dockstring import load_target
+        target = load_target(myprotein[j])
+        #如果目标没有可以自己做。 试试。
+        # 目录是 /Users/chaochen/anaconda3/envs/dockstring/lib/python3.10/site-packages/dockstring/resources/targets/SRC_conf.txt
+        score, aux = target.dock(smiles)
+        # print(target)
+        print(score)
+        # print(aux["affinities"])
+        # print(aux)
+        target_result.append(score)
+
+    #target.view([aux['ligand']])
+
+import numpy as np
+
+print(target_result)
+print(str(target_result))
+bbb = np.array(target_result)
+ccc= bbb.reshape((9,16))
+print(ccc
+      )
+
+with open("temp_docking_result.txt", mode='w') as file:
+    array_length_last=len(target_result)
+
+    for k in range(array_length_last):
+        file.writelines(str(target_result[k])+"\n")
+
+np.savetxt('temp_docking_all_score.csv', ccc,fmt='%.2f',delimiter=',',header="test")
