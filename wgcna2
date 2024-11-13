@@ -1,0 +1,196 @@
+rm(list = ls())
+setwd("/Users/chaochen/Desktop/BAP")
+
+library(WGCNA)
+options(stringsAsFactors = FALSE);
+allowWGCNAThreads()  #开启多线程 # mac 独有
+#载入第一步保存的数据
+lnames = load("AD-01-dataInput.RData");
+lnames
+
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(datExpr0, powerVector = powers, verbose = 5)
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+sft$powerEstimate #如果显示的结果为 NA，则表明系统无法给出合适的软阈值，这时候就需要自己挑选软阈值。还是用8
+#corType: pearson or bicor   这个地方做其他统计时要改变， 现在是二元变量
+#https://www.jianshu.com/p/1804fb6d2ed8  # 改单项
+#https://www.biostars.org/p/332661/   数据不理想时
+net = blockwiseModules(datExpr0, power = 5,
+                       TOMType = "unsigned", minModuleSize = 20,
+                       reassignThreshold = 0, mergeCutHeight = 0.15,
+                       numericLabels = TRUE, pamRespectsDendro = FALSE,
+                       saveTOMs = TRUE,
+                       saveTOMFileBase = "femaleMouseTOM", ##### 这个很关键,需要创建WGCNA的文件夹
+                       verbose = 3,
+                       corType = "bicor",
+                       #corType = "pearson",
+                       maxBlockSize = 20000) # 我这里要看下基因数再设置
+# power = 6是刚才选择的软阈值
+#minModuleSize：模块中最少的基因数
+#mergeCutHeight ：模块合并阈值，阈值越大，模块越少（重要）
+#saveTOMs = TRUE,saveTOMFileBase = "femaleMouseTOM"保存TOM矩阵，名字为"femaleMouseTOM"
+#net$colors 包含模块分配，net$MEs 包含模块的模块特征基因。
+table(net$colors)
+
+sizeGrWindow(12, 9)
+mergedColors = labels2colors(net$colors)
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+MEs = net$MEs;
+geneTree = net$dendrograms[[1]];
+
+
+# Turn data expression into topological overlap matrix
+power=sft$powerEstimate
+adjacency = adjacency(datExpr0, power = power)
+TOM = TOMsimilarity(adjacency)
+dissTOM = 1-TOM 
+# Plot gene tree
+geneTree = hclust(as.dist(dissTOM), method = "average");
+pdf(file = "3-gene_cluster.pdf", width = 12, height = 9);
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04);
+dev.off()
+
+# Module identification using dynamic tree cut
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,deepSplit = 2, 
+                            pamRespectsDendro = FALSE,minClusterSize = 30);
+table(dynamicMods)
+length(table(dynamicMods)) 
+# Convert numeric labels into colors
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+# Plot the dendrogram and colors underneath
+pdf(file = "4-module_tree.pdf", width = 8, height = 6);
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",dendroLabels = FALSE,
+                    hang = 0.03,addGuide = TRUE, guideHang = 0.05,main = "Gene dendrogram and module colors")
+dev.off()
+###
+#样模块合并
+
+# Merge close modules
+MEDissThres=0.45  ## 参数可以自己调整
+abline(h=MEDissThres, col = "red")
+merge = mergeCloseModules(datExpr0, dynamicColors, cutHeight = MEDissThres, verbose = 3) 
+mergedColors = merge$colors  
+mergedMEs = merge$newMEs  
+# Plot merged module tree
+pdf(file = "5-merged_Module_Tree.pdf", width = 12, height = 9)  
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors), 
+                    c("Dynamic Tree Cut", "Merged dynamic"), dendroLabels = FALSE, 
+                    hang = 0.03, addGuide = TRUE, guideHang = 0.05)  
+dev.off()
+# 输出合并前后额模块
+write.table(merge$oldMEs,file="oldMEs.txt");
+write.table(merge$newMEs,file="newMEs.txt");
+######
+
+
+nGenes = ncol(datExpr0) 
+nSamples = nrow(datExpr0) 
+nSelect = 800 
+# For reproducibility, we set the random seed  
+set.seed(10) 
+select = sample(nGenes, size = nSelect) 
+selectTOM = dissTOM[select, select] 
+# 
+selectTree = hclust(as.dist(selectTOM), method = "average") 
+selectColors = moduleColors[select] 
+
+
+plotDiss = selectTOM^7 
+diag(plotDiss) = NA
+library("gplots") 
+pdf(file="6-temp_Network heatmap plot_selected genes.pdf",width=9, height=9) 
+mycol = colorpanel(250,'red','orange','lemonchiffon') 
+TOMplot(plotDiss, selectTree, selectColors, col=mycol ,main = "Network heatmap plot, selected genes") 
+dev.off()
+
+#####
+
+
+
+#http://rstudio-pubs-static.s3.amazonaws.com/554864_6e0f44cdc1474b8ba2c5f8326559bbe4.html
+
+###
+## ---- echo=T, fig.cap="模块之间的相关性", fig.width=5, fig.height=8------
+## ---- echo=T, fig.cap="模块之间的相关性", fig.width=5, fig.height=8------
+### 基因和所在模块信息
+gene_module <- data.frame(ID=colnames(datExpr0), module=moduleColors)
+gene_module = gene_module[order(gene_module$module),]
+write.table(gene_module,file="temp_gene_module.xls", sep="\t", quote=F, row.names=F) #后续分析用
+
+# module eigengene, 可以绘制线图，作为每个模块的基因表达趋势的展示
+MEs = net$MEs
+
+### 不需要重新计算，改下列名字就好
+### 官方教程是重新计算的，其实可以不用这么麻烦
+library(stringr)
+MEs_col = MEs
+colnames(MEs_col) = paste0("ME", labels2colors(
+  as.numeric(str_replace_all(colnames(MEs),"ME",""))))
+MEs_col = orderMEs(MEs_col)
+
+## 保存模块代表性信息
+MEs_colt = as.data.frame(t(MEs_col))
+colnames(MEs_colt) = rownames(datExpr0)
+write.table(MEs_colt,file="temp_module_eipgengene.xls", sep="\t",quote=F)
+
+# 根据基因间表达量进行聚类所得到的各模块间的相关性图
+# marDendro/marHeatmap 设置下、左、上、右的边距
+
+pdf(file="7-temp_plotEigengeneNetworks.pdf", onefile=F, paper="special", 
+    bg="white", pointsize=6)
+plotEigengeneNetworks(MEs_col, "Eigengene adjacency heatmap", 
+                      marDendro = c(3,3,2,4),
+                      marHeatmap = c(3,4,2,2), plotDendrograms = T, 
+                      xLabelsAngle = 90)
+dev.off()
+
+## png 
+
+plotEigengeneNetworks(MEs_col, "Eigengene adjacency heatmap", 
+                      marDendro = c(3,3,2,4),
+                      marHeatmap = c(3,4,2,2), plotDendrograms = T, 
+                      xLabelsAngle = 90)
+## 如果有表型数据，也可以跟ME数据放一起，一起出图
+#MEs_colpheno = orderMEs(cbind(MEs_col, traitData))
+#plotEigengeneNetworks(MEs_colpheno, "Eigengene adjacency heatmap", 
+#                      marDendro = c(3,3,2,4),
+#                      marHeatmap = c(3,4,2,2), plotDendrograms = T, 
+#                      xLabelsAngle = 90)
+
+#####做个cyte
+# choose module
+###https://support.bioconductor.org/p/125161/#125230
+#要试试。
+
+
+
+save(MEs, moduleLabels, moduleColors, geneTree,
+     file = "AD-02-networkConstruction-auto.RData")
