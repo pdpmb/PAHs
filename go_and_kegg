@@ -1,0 +1,92 @@
+rm(list = ls())
+setwd("/Users/chaochen/Desktop/BAP")
+getwd();
+ls()
+
+network_145<-read.csv("/Users/chaochen/Desktop/BAPfig/network_145_genes.csv",header = FALSE)
+
+
+network_145
+colnames(network_145)<-"gene_id"
+gene_id<-network_145$gene_id
+#keyType = "SYMBOL"
+library(clusterProfiler)
+library(org.Hs.eg.db)
+#library(topGO)
+#https://www.jianshu.com/p/a55244438bd5 好看点
+#https://zhuanlan.zhihu.com/p/536077093
+test = bitr(gene_id, fromType="SYMBOL", toType=c("ENSEMBL", "ENTREZID"), OrgDb= org.Hs.eg.db) #将SYMBOL格式转为ENSEMBL和ENTERZID格式 
+head(test,2)
+
+# ggo <- groupGO(gene = test$ENTREZID, OrgDb = org.Hs.eg.db, ont = "CC", level = 3, readable = TRUE)
+# head(ggo,3)
+# 
+# barplot(ggo, showCategory=20,
+#         label_format = 60,
+#         title="1")#条状图，按p从小到大排，绘制前20个Term
+##############################
+ego_all <- enrichGO(gene = gene_id, 
+                                                     #universe = names(geneList),
+                                                     OrgDb = org.Hs.eg.db,
+                                                     ont = "ALL", 
+                                        
+                                                     keyType = 'SYMBOL',
+                                                     pAdjustMethod = "BH",pvalueCutoff = 0.01, qvalueCutoff = 0.05,
+                                                     readable = FALSE)
+#dotplot(ego_MF,title="EnrichmentGO_MF_dot")#点图，按富集的数从大到小的
+
+head(ego_all,20 )
+
+ego_all@result[3,3]="neuroinflammatory response"
+library(Hmisc)
+
+ego_all@result$Description <- capitalize(ego_all@result$Description)
+
+barplot(ego_all, showCategory=20,
+        label_format = 65,
+        title="1")#条状图，按p从小到大排，绘制前20个Term
+
+
+
+
+#https://rdrr.io/bioc/enrichplot/man/barplot.enrichResult.html  改参数
+#画kegg图
+
+  output <- bitr(gene_id,
+                 fromType = 'SYMBOL',
+                 toType = c('ENTREZID'),
+                 OrgDb = 'org.Hs.eg.db')
+  
+  ekegg <- enrichKEGG(gene = output$ENTREZID , 
+                      #pvalueCutoff      = 0.05,
+                      pAdjustMethod     = "BH",
+                      qvalueCutoff  = 0.05,
+                      organism = 'hsa',
+                      )
+ head(ekegg) 
+
+  write.csv( ekegg,"temp_KEGG-enrich2.csv",row.names =FALSE)
+  #barplot(ekegg, showCategory=20)
+  dotplot(ekegg, showCategory=20,label_format = 60)
+
+
+# kegg_gene<- ekegg@result$geneID
+ kegg_enrich_list<-as.data.frame(ekegg)
+ head(kegg_enrich_list)
+ ko_list<-kegg_enrich_list["hsa05140","geneID"]
+ library("stringr")
+ ko_list<-str_split(ko_list,"/")
+ko_list<-unlist(ko_list)
+ko_list<-as.data.frame(ko_list)
+ 
+ colnames(ko_list)[1] <- 'KEGG'
+ko_list
+outputko_list <- bitr(ko_list$KEGG,
+               fromType = 'ENTREZID',
+               toType = c('SYMBOL'),
+               OrgDb = 'org.Hs.eg.db')
+outputko_list
+
+
+
+
