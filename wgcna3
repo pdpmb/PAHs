@@ -1,0 +1,324 @@
+rm(list = ls())
+setwd("/Users/chaochen/Desktop/BAP")
+getwd();
+ls()
+library(WGCNA)
+#https://zhuanlan.zhihu.com/p/559077227
+load("AD-01-dataInput.RData")
+load("AD-02-networkConstruction-auto.RData")
+# The following setting is important, do not omit.
+ls()
+options(stringsAsFactors = FALSE);
+
+# Define numbers of genes and samples
+nGenes = ncol(datExpr0);
+nSamples = nrow(datExpr0);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(datExpr0, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+moduleTraitCor = cor(MEs, ADTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples);
+
+
+#=====================================================================================
+#
+#  Code chunk 3
+#
+#=====================================================================================
+#https://zhuanlan.zhihu.com/p/503837859
+
+sizeGrWindow(10,6)
+# Will display correlations and their p-values
+textMatrix =  paste(signif(moduleTraitCor, 2), "\n(",
+                    signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(6, 8.5, 3, 3));
+ADTraits
+dim(ADTraits)
+colnames(ADTraits)
+names(MEs)
+# Display the correlation values within a heatmap plot
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = colnames(ADTraits),  #### 这个别错了
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = blueWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 0.5,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+
+
+labeledHeatmap.multiPage(Matrix = moduleTraitCor,
+                         xLabels = colnames(ADTraits),  #### 这个别错了
+                         yLabels = names(MEs),
+                         ySymbols = names(MEs),
+                         colorLabels = FALSE,
+                         colors = blueWhiteRed(50),
+                         textMatrix = textMatrix,
+                         setStdMargins = FALSE,
+                         rowsPerPage = NULL, maxRowsPerPage = 25,
+                         colsPerPage = NULL, maxColsPerPage = 10,
+                         addPageNumberToMain = FALSE,
+                         cex.text = 0.5,
+                         zlim = c(-1,1),
+                         main = paste("Module-trait relationships")
+)
+
+
+
+#colors = greenWhiteRed(50)不适用于红绿色盲患者，建议用 blueWhiteRed代替.
+#该分析确定了几个重要的模块-特征关联。我们将体重作为感兴趣的特征来研究。
+
+ADTraits<-as.data.frame(ADTraits)
+ADTraits$trait  # 自己刷下格式
+weight = as.data.frame(ADTraits$trait);
+colnames(weight) = "weight";
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr0, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+geneTraitSignificance = as.data.frame(cor(datExpr0, weight, use = "p"));#和体重性状的关联
+dim(datExpr0)
+dim(weight)
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS.", names(weight), sep="");
+names(GSPvalue) = paste("p.GS.", names(weight), sep="");
+
+
+head(geneTraitSignificance)
+geneTraitSignificance["APOE",]
+
+###https://www.jianshu.com/p/360dc479c685
+#筛选hubgene\\\
+datKME=signedKME(datExpr0, MEs, outputColumnName="kME_MM.")
+module = "grey60"
+column = match(module, modNames)
+moduleGenes = moduleColors==module
+lightyellow_module<-as.data.frame(dimnames(data.frame(datExpr0))[[2]][moduleGenes])
+names(lightyellow_module)="genename"
+lightyellow_KME<-as.data.frame(datKME[moduleGenes,column]) 
+names(lightyellow_KME)="KME"
+rownames(lightyellow_KME)=lightyellow_module$genename
+FilterGenes = abs(lightyellow_KME$KME) > 0.8
+table(FilterGenes)
+lightgreen_hub<-subset(lightyellow_KME, abs(lightyellow_KME$KME)>0.8)
+write.csv(lightgreen_hub, paste("temp_hubgene_1", module, ".csv") )
+
+###########################333
+module = "pink"
+column = match(module, modNames)
+moduleGenes = moduleColors==module
+lightyellow_module<-as.data.frame(dimnames(data.frame(datExpr0))[[2]][moduleGenes])
+names(lightyellow_module)="genename"
+lightyellow_KME<-as.data.frame(datKME[moduleGenes,column]) 
+names(lightyellow_KME)="KME"
+rownames(lightyellow_KME)=lightyellow_module$genename
+FilterGenes = abs(lightyellow_KME$KME) > 0.8
+table(FilterGenes)
+lightgreen_hub<-subset(lightyellow_KME, abs(lightyellow_KME$KME)>0.8)
+write.csv(lightgreen_hub, paste("temp_hubgene_1", module, ".csv") )
+
+###
+module = "midnightblue"
+column = match(module, modNames)
+moduleGenes = moduleColors==module
+lightyellow_module<-as.data.frame(dimnames(data.frame(datExpr0))[[2]][moduleGenes])
+names(lightyellow_module)="genename"
+lightyellow_KME<-as.data.frame(datKME[moduleGenes,column]) 
+names(lightyellow_KME)="KME"
+rownames(lightyellow_KME)=lightyellow_module$genename
+lightyellow_KME<-lightyellow_KME[which(abs(lightyellow_KME$KME) > 0.8),,drop=FALSE]
+lightyellow_KME
+row.names(lightyellow_KME)
+
+
+
+#write.csv(lightyellow_hub, "temp_hubgene_pink.csv")
+
+HubGenes <- chooseTopHubInEachModule(datExpr0,moduleColors)
+write.csv (HubGenes,file = "temp_TopHubGenes_of_each_module.csv",quote=F)
+
+#\\\\
+datKME=signedKME(datExpr0, MEs, outputColumnName="kME_MM.")
+write.csv(datKME, "temp_kME_MM.csv")
+
+######写个循环用来输出
+file_path <- "temp_data.txt"
+library(dplyr)
+for(i in c("black","red","blue","turquoise","grey60","pink", "tan","midnightblue")) {
+module = i
+column = match(module, modNames)
+moduleGenes = moduleColors==module
+lightyellow_module<-as.data.frame(dimnames(data.frame(datExpr0))[[2]][moduleGenes])
+names(lightyellow_module)="genename"
+lightyellow_KME<-as.data.frame(datKME[moduleGenes,column]) 
+names(lightyellow_KME)="KME"
+#names(lightyellow_KME)=i
+rownames(lightyellow_KME)=lightyellow_module$genename
+lightyellow_KME<-lightyellow_KME[which(abs(lightyellow_KME$KME) > 0.8),,drop=FALSE]
+lightyellow_KME
+write.table(i, file_path, sep = "\t", row.names = FALSE, append = TRUE)
+write.table(lightyellow_KME, file_path, sep = "\t", row.names = TRUE, append = TRUE)
+}
+
+
+
+
+###用这个
+
+#hub<- abs(geneModuleMembership$MMlightyellow)>0.8 & abs(geneTraitSignificance)>0.2
+###########8个组。
+hubgene_black = abs(datKME$kME_MM.black) > 0.8
+table(hubgene_black)
+hubgene_black <- dimnames(data.frame(datExpr0))[[2]][hubgene_black]
+hubgene_black
+write.csv(hubgene_black, "temp_hubgene_black.csv")
+
+hubgene_red = abs(datKME$kME_MM.red) > 0.8
+table(hubgene_red)
+hubgene_red <- dimnames(data.frame(datExpr0))[[2]][hubgene_red]
+hubgene_red
+write.csv(hubgene_red, "temp_hubgene_red.csv")
+
+hubgene_blue = abs(datKME$kME_MM.blue) > 0.8
+table(hubgene_blue)
+hubgene_blue <- dimnames(data.frame(datExpr0))[[2]][hubgene_blue]
+hubgene_blue
+write.csv(hubgene_blue, "temp_hubgene_blue.csv")
+
+hubgene_turquoise = abs(datKME$kME_MM.turquoise) > 0.8
+hubgene_turquoise <- dimnames(data.frame(datExpr0))[[2]][hubgene_turquoise]
+write.csv(hubgene_turquoise, "temp_hubgene_turquoise.csv")
+
+hubgene_grey60 = abs(datKME$kME_MM.grey60) > 0.8
+hubgene_grey60 <- dimnames(data.frame(datExpr0))[[2]][hubgene_grey60]
+write.csv(hubgene_grey60, "temp_hubgene_grey60.csv")
+
+hubgene_pink = abs(datKME$kME_MM.pink) > 0.8
+hubgene_pink <- dimnames(data.frame(datExpr0))[[2]][hubgene_pink]
+write.csv(hubgene_pink, "temp_hubgene_pink.csv")
+
+hubgene_tan = abs(datKME$kME_MM.tan) > 0.8
+hubgene_tan <- dimnames(data.frame(datExpr0))[[2]][hubgene_tan]
+write.csv(hubgene_tan, "temp_hubgene_tan.csv")
+
+hubgene_midnightblue = abs(datKME$kME_MM.midnightblue) > 0.8
+hubgene_midnightblue <- dimnames(data.frame(datExpr0))[[2]][hubgene_midnightblue]
+write.csv(hubgene_midnightblue, "temp_hubgene_midnightblue.csv")
+
+
+
+
+
+#############
+
+cbind.fill <- function(...){
+  nm <- list(...)
+  nm <- lapply(nm, as.matrix)
+  n <- max(sapply(nm, nrow))
+  do.call(cbind, lapply(nm, function (x)
+    rbind(x, matrix(, n-nrow(x), ncol(x)))))
+}
+
+hubgenss<-cbind.fill(as.data.frame (hubgene_black),
+                           as.data.frame (hubgene_red),
+                           as.data.frame (hubgene_blue),
+                           as.data.frame (hubgene_turquoise),
+                           as.data.frame (hubgene_grey60),
+                           as.data.frame (hubgene_pink),
+                           as.data.frame (hubgene_tan),
+                           as.data.frame (hubgene_midnightblue)
+                           )
+write.csv(hubgenss, "temp_hubgenes_KME_8.csv")
+
+require(plyr)
+hubgensss<-rbind.fill(as.data.frame (hubgene_black),
+                     as.data.frame (hubgene_red),
+                     as.data.frame (hubgene_blue),
+                     as.data.frame (hubgene_turquoise),
+                     as.data.frame (hubgene_grey60),
+                     as.data.frame (hubgene_pink),
+                     as.data.frame (hubgene_tan),
+                     as.data.frame (hubgene_midnightblue)
+)
+write.csv(hubgensss, "temp_hubgenes_KME_8ss.csv")
+
+#运行以下代码可视化GS和MM
+#module = "red"
+# module = "midnightblue"
+module = "black"
+column = match(module, modNames);
+moduleGenes = moduleColors==module;
+sizeGrWindow(7, 7);
+par(mfrow = c(1,1));
+verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
+                   abs(geneTraitSignificance[moduleGenes, 1]),
+                   xlab = paste("Module Membership in", module, "module"),
+                   ylab = "Gene significance for AD",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+
+#图中的每一个点代表一个基因，横坐标值表示基因与模块的相关性，纵坐标值表示基因与表型性状的相关性
+#，这里可以看出与性状高度显著相关的基因往往是与这个性状显著相关的模块中的重要元素。
+# 主要是可视化 TOM矩阵，WGCNA的标准配图
+# 然后可视化不同 模块 的相关性 热图
+# 不同模块的层次聚类图
+# 还有模块诊断，主要是 intramodular connectivity
+geneModuleMembership[moduleGenes, column]
+
+####做cyto图
+#https://www.jianshu.com/p/360dc479c685
+#做hub gene 要。 
+
+## 这部分在专题（3）中计算过一次，因为没有保存，所以这里又重新计算ls()
+ls()
+#"ADTraits"     "datExpr0"     "geneTree"     "MEs"          "moduleColors" "moduleLabels"
+ADJ=abs(cor(datExpr0,use="p"))^6
+
+Alldegrees =intramodularConnectivity(ADJ, moduleColors)
+Alldegrees
+write.csv(Alldegrees, file = "temp_intramodularConnectivity.csv")
+nSamples = nrow(datExpr0)
+head(ADTraits)
+weight = as.data.frame(ADTraits[,1]) # 唯一一个
+names(weight) = "weight"
+head(weight)
+head(MEs)
+modNames = substring(names(MEs), 3)
+head(modNames)
+geneModuleMembership = as.data.frame(cor(datExpr0, MEs, use = "p"))
+head(geneModuleMembership)
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+
+names(geneModuleMembership) = paste("MM", modNames, sep="")
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+# 计算性状和基因表达量之间的相关性（GS）
+geneTraitSignificance = as.data.frame(cor(datExpr0, weight, use = "p"))
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples))
+names(geneTraitSignificance) = paste("GS.", names(weight), sep="")
+names(GSPvalue) = paste("p.GS.", names(weight), sep="")
+
+
+colorlevels=unique(moduleColors)
+pdf("temp_GS vs. degree_weight.pdf",width = 14,height = 8)
+# 布局。这个可以根据自己的module数目进行调整。我有20个module，所以这里设置了4行，每行5个图
+par(mfrow=c(4,5))
+# 设置图形边界，四个数字分别对应下左上右
+par(mar = c(5,5,3,3))
+for (i in c(1:length(colorlevels))) 
+{
+  whichmodule=colorlevels[[i]]; 
+  restrict1 = (moduleColors==whichmodule);
+  verboseScatterplot(Alldegrees$kWithin[restrict1], 
+                     geneTraitSignificance[restrict1,1], 
+                     col=moduleColors[restrict1],
+                     main=whichmodule, 
+                     xlab = "Connectivity", ylab = "Gene Significance", abline = TRUE)
+}
+dev.off()
+
+
