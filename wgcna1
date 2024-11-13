@@ -1,0 +1,132 @@
+rm(list = ls())
+setwd("/Users/chaochen/Desktop/BAP")
+load(file = "expr_last1_bactch.Rdata")
+ls()
+expr_last1_bactch[1:10,1:10]
+dim(expr_last1_bactch)
+group_factor<-as.data.frame(group_factor)
+head(group_factor)
+mode(group_factor)
+rownames(group_factor)
+!grepl("GSM1423944",rownames(group_factor))
+
+#https://www.plob.org/article/24796.html#google_vignette  讲清楚了原理
+#####删除一个利群样本
+
+expr_last1_bactch<-expr_last1_bactch[,!grepl("GSM1423944|GSM1423902|GSM225757",colnames(expr_last1_bactch))]
+group_factor<-group_factor[!grepl("GSM1423944|GSM1423902|GSM225757",rownames(group_factor)),,drop=FALSE]
+dim(expr_last1_bactch)
+
+
+data2<-expr_last1_bactch[complete.cases(expr_last1_bactch),]
+dim(data2)  #确认下，有没有缺失
+
+dim(group_factor)
+#需要删除离群的样本
+
+
+library(WGCNA)
+
+#https://www.jianshu.com/p/4a9f6e31fdab
+
+#https://zhuanlan.zhihu.com/p/503837859
+datExpr0 = t(expr_last1_bactch)  #  行名为样本名，列名为基因名。此为  GSM1423944
+
+datExpr0[1:5,1:5]
+dim(datExpr0)
+
+rownames(datExpr0)
+#  https://zhuanlan.zhihu.com/p/560397004     去除噪音基因
+my_mad <- function(x){mad(x,na.rm = TRUE)} #mad时将缺失值去掉  
+m.mad <- apply(datExpr0,2,my_mad)  ## 1: 按行, 2: 按列
+#筛选时不设置mad最小值，筛选中位绝对偏差大于75%的基因，75%的基因或者探针。
+#datExpr0 <- datExpr0[,which(m.mad > quantile(m.mad, probs=seq(0, 1, 0.25))[2])]
+
+datExpr0 <- datExpr0[,which(m.mad > quantile(m.mad, probs=seq(0, 1, 0.1))[2])]  #%90
+#https://blog.csdn.net/gdkyxy2013/article/details/80897147   quantile 用法
+dim(datExpr0)
+
+#dat[,complete.cases(t(dat))]   需要删除有空值的列么？################3
+
+gsg = goodSamplesGenes(datExpr0, verbose = 3)
+gsg
+
+# # 去除有问题的基因和样本
+# if (!gsg$allOK)
+# {
+#   # Optionally, print the gene and sample names that were removed:
+#   if (sum(!gsg$goodGenes)>0)
+#     printFlush(paste("Removing genes:", paste(names(datExpr0)[!gsg$goodGenes], collapse = ", ")));
+#   if (sum(!gsg$goodSamples)>0)
+#     printFlush(paste("Removing samples:", paste(rownames(datExpr0)[!gsg$goodSamples], collapse = ", ")));
+#   # Remove the offending genes and samples from the data:
+#   datExpr0 = datExpr0[gsg$goodSamples, gsg$goodGenes]
+# }
+
+#对样本进行聚类
+sampleTree = hclust(dist(datExpr0), method = "average");
+# Plot the sample tree: Open a graphic output window of size 12 by 9 inches
+# The user should change the dimensions if the window is too large or too small.
+sizeGrWindow(12,9)
+#pdf(file = "Plots/sampleClustering.pdf", width = 12, height = 9);
+par(cex = 0.6);
+par(mar = c(0,4,2,0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5,
+     cex.axis = 1.5, cex.main = 2)
+
+# # 去除可能的异常值
+# # Plot a line to show the cut
+# abline(h = 110, col = "red");
+# # Determine cluster under the line
+# clust = cutreeStatic(sampleTree, cutHeight = 110, minSize = 10)
+# table(clust)
+# # clust 1 contains the samples we want to keep.
+# keepSamples = (clust==1)
+# datExpr = datExpr0[keepSamples, ]  # 清洗以后的数据
+# nGenes = ncol(datExpr)
+# nSamples = nrow(datExpr)
+
+trait0<-group_factor
+
+
+library(dplyr)
+trait1<-as.data.frame(trait0)
+trait1
+head(trait1)   #(1表示属于此组或有此属性，0表示不属于此组或无此属性）
+trait2<-trait1 %>%
+  mutate(trait=case_when(group_factor == "CTL" ~ "0",
+                         group_factor == "AD" ~ "1",
+                           TRUE ~ NA_character_)) 
+# dim(trait2)
+# trait2<-as.data.frame(trait2[,-1])
+# rownames(trait2)<-rownames(trait1)
+trait2
+allTraits<-trait2
+femaleSamples = rownames(datExpr0);
+traitRows = match(femaleSamples, rownames(allTraits));
+traitRows
+
+datTraits = allTraits[traitRows, -1, drop = FALSE];
+
+
+class(datTraits)
+datTraits
+dim(datTraits)
+#https://zhuanlan.zhihu.com/p/94476408
+
+write.table (datTraits, file ="tempdatTraits.txt", sep ="\t", row.names =TRUE, col.names =TRUE, quote =F)
+ADTraits<-read.table("tempdatTraits.txt",sep = "\t",row.names = 1,stringsAsFactors = F,header = T)
+ADTraits<-as.matrix(ADTraits)
+
+ADTraits
+
+collectGarbage()
+
+#可视化表型数据与基因表达量数据的联系，重构样本聚类树
+sampleTree2 = hclust(dist(datExpr0), method = "average")
+traitColors = numbers2colors(ADTraits, signed = FALSE) #用颜色代表关联度
+plotDendroAndColors(sampleTree2, traitColors,
+                    groupLabels = names(ADTraits),
+                    main = "Sample dendrogram and trait heatmap")
+
+save(datExpr0, ADTraits, file = "AD-01-dataInput.RData")
