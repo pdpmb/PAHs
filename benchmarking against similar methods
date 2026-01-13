@@ -1,0 +1,254 @@
+#比较二分类的数据11
+#比较基线用
+rm(list = ls())
+setwd("/Users/chaochen/Desktop/BAP")
+library(dplyr)
+load(file ="dat_factor1.rda")
+load(file ="dat_factor2.rda")
+load(file ="dat_factor3.rda")
+load(file ="dat_factor4.rda")
+load(file ="dat_factor5.rda")
+load(file ="dat_factor8.rda")
+load(file="expr_last1_bactch.Rdata")
+load(file="xgbfit.RData")
+ls()
+
+library(plotROC)
+dim(dat_factor1)
+dim(dat_factor8)
+
+network_145<-read.csv("/Users/chaochen/Desktop/BAPfig/network_145_genes.csv",header = FALSE)
+######################################计算另外的，如1号
+dat_factor1[,dim(dat_factor1)[2]]
+tail(colnames(dat_factor1))
+dat_factor1[1:3, 1:4]  #exp_group_factor
+names(dat_factor1)[names(dat_factor1) =="exp_group_factor"] <- "group_factor"
+tail(names(dat_factor1))
+
+dat_factor11<-dat_factor1[,na.omit(match(network_145$V1,colnames(dat_factor1)))]
+
+dat_factor11
+dim(dat_factor11)
+
+dat_factor11$group_factor<- ifelse(dat_factor1$group_factor == "CTL", 0, 1)
+
+dat_factor1$group_factor
+
+dat_factor11$group_factor
+
+table(dat_factor11$group_factor)
+
+
+exp_xg<-as.data.frame(dat_factor11)
+dim(exp_xg)
+dat<-exp_xg
+
+summary(dat$group_factor)
+## =========================
+## 0. 环境准备
+## =========================
+library(randomForest)
+library(gbm)
+library(glmnet)
+library(xgboost)
+library(pROC)
+library(caret)
+
+set.seed(123)
+
+## =========================
+## 1. 读入与整理数据
+## =========================
+# dat: 行 = 样本；列 1:139 = 基因表达；第 140 列 group_factor = 0/1 疾病状态
+# 确保是因子（0=无病, 1=有病）
+dat$group_factor <- factor(dat$group_factor, levels = c(0, 1))
+
+X <- dat[, 1:139]
+y <- dat$group_factor
+
+# 70/30 分层抽样划分训练/测试
+train_idx <- createDataPartition(y, p = 0.5, list = FALSE)
+X_train <- X[train_idx, ]
+X_test  <- X[-train_idx, ]
+y_train <- y[train_idx]
+y_test  <- y[-train_idx]
+
+## =========================
+## 2. Random Forest 二分类
+## =========================
+cat("Random Forest (classification)...\n")
+rf_model <- randomForest(x = X_train, y = y_train, ntree = 500)
+rf_prob  <- predict(rf_model, X_test, type = "prob")[, "1"]
+
+## =========================
+## 3. GBM 二分类
+## =========================
+cat("GBM (classification)...\n")
+
+# 建一个显式的数值 0/1 向量作为响应
+y_train_num <- as.numeric(as.character(y_train))  # factor(0,1) -> numeric 0/1
+
+gbm_model <- gbm(
+  formula = y_train_num ~ .,
+  data    = data.frame(X_train),
+  distribution = "bernoulli",
+  n.trees = 3000,
+  interaction.depth = 3,
+  shrinkage = 0.01,
+  n.minobsinnode = 10,
+  verbose = FALSE
+)
+
+gbm_prob <- predict(
+  gbm_model,
+  newdata = data.frame(X_test),
+  n.trees = 3000,
+  type = "response"   # 输出 1 的概率
+)
+## =========================
+## 4. Ridge Logistic Regression（二分类）
+## =========================
+cat("Ridge logistic regression...\n")
+x_mat_train <- as.matrix(X_train)
+x_mat_test  <- as.matrix(X_test)
+
+ridge_model <- cv.glmnet(
+  x = x_mat_train,
+  y = as.numeric(as.character(y_train)), # 0/1
+  family = "binomial",
+  alpha = 0          # ridge
+)
+
+ridge_prob <- as.numeric(predict(
+  ridge_model,
+  newx = x_mat_test,
+  s = "lambda.min",
+  type = "response"   # 概率
+))
+
+## =========================
+## 5. XGBoost 二分类
+## =========================
+cat("XGBoost (classification)...\n")
+
+dtrain <- xgb.DMatrix(
+  data  = as.matrix(X_train),
+  label = as.numeric(as.character(y_train))
+)
+dtest <- xgb.DMatrix(
+  data  = as.matrix(X_test),
+  label = as.numeric(as.character(y_test))
+)
+
+# params <- list(
+#   objective = "binary:logistic",
+#   eval_metric = "auc",
+#   max_depth = 4,
+#   eta = 0.05,
+#   subsample = 0.8,
+#   colsample_bytree = 0.8
+# )
+
+params <- list(  objective           = "binary:logistic",   #“reg:linear” –linear regression：回归
+                booster             = "gbtree",
+                eval_metric         = "error", #   “error”:分类任务
+                eta                 = 0.1, 
+                max_depth           = 5,  #树的最大深度，值越大，树越复杂。
+                subsample           = 0.5,
+                colsample_bytree    = 1,
+                gamma               = 0.25,#最小损失函数下降值。
+                min_child_weight    =1,
+                nthread=4,
+                scale_pos_weight=0.2751423
+)
+
+
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 300,
+  watchlist = list(train = dtrain),
+  verbose = 0
+)
+
+xgb_prob <- predict(xgb_model, dtest)  # 概率
+
+## =========================
+## 6. ROC / AUC 与准确率比较
+## =========================
+cat("Evaluating models...\n")
+
+roc_rf    <- roc(y_test, rf_prob)
+roc_gbm   <- roc(y_test, gbm_prob)
+roc_ridge <- roc(y_test, ridge_prob)
+roc_xgb   <- roc(y_test, xgb_prob)
+
+auc_rf    <- auc(roc_rf)
+auc_gbm   <- auc(roc_gbm)
+auc_ridge <- auc(roc_ridge)
+auc_xgb   <- auc(roc_xgb)
+
+cat("AUC (RF):     ", auc_rf,    "\n")
+cat("AUC (GBM):    ", auc_gbm,   "\n")
+cat("AUC (Ridge):  ", auc_ridge, "\n")
+cat("AUC (XGBoost):", auc_xgb,   "\n")
+
+# 0.5 阈值转成 0/1 预测
+to_label <- function(p) factor(ifelse(p >= 0.5, 1, 0), levels = c(0,1))
+#to_label <- function(p) factor(ifelse(p >= 0.57, 1, 0), levels = c(0,1))
+
+pred_rf    <- to_label(rf_prob)
+pred_gbm   <- to_label(gbm_prob)
+pred_ridge <- to_label(ridge_prob)
+pred_xgb   <- to_label(xgb_prob)
+
+acc_rf    <- mean(pred_rf    == y_test)
+acc_gbm   <- mean(pred_gbm   == y_test)
+acc_ridge <- mean(pred_ridge == y_test)
+acc_xgb   <- mean(pred_xgb   == y_test)
+
+cat("Accuracy (RF):     ", acc_rf,    "\n")
+cat("Accuracy (GBM):    ", acc_gbm,   "\n")
+cat("Accuracy (Ridge):  ", acc_ridge, "\n")
+cat("Accuracy (XGBoost):", acc_xgb,   "\n")
+
+## =========================
+## 7. ROC 图：Classification Model Performance Comparison
+## =========================
+## 7. ROC 图：Classification Model Performance Comparison
+par(mfrow = c(1, 1))
+plot(roc_rf,
+     col  = "darkgreen",
+     lwd  = 2,
+     ylim = c(0, 1),           # y 轴固定 0–1
+     xlim = c(1, 0),           # 让 Specificity 从 1 到 0
+     xlab = "Specificity",
+     ylab = "Sensitivity",
+     main = "Classification Model Performance Comparison",
+     legacy.axes = TRUE)       # 保持传统 ROC 轴方向
+
+lines(roc_gbm,   col = "blue",   lwd = 2)
+lines(roc_ridge, col = "red",    lwd = 2)
+lines(roc_xgb,   col = "purple", lwd = 2)
+
+abline(a = 1, b = -1, col = "grey")  # 对角线，可要可不要
+
+legend("bottomright",
+       legend = c(
+         paste0("RF (AUC=",    round(auc_rf, 3),    ")"),
+         paste0("GBM (AUC=",   round(auc_gbm, 3),   ")"),
+         paste0("Ridge (AUC=", round(auc_ridge, 3), ")"),
+         paste0("XGB (AUC=",   round(auc_xgb, 3),   ")")
+       ),
+       col = c("darkgreen","blue","red","purple"),
+       lwd = 2,
+       bty = "n")
+
+
+
+roc_ridge <- roc(y_test, ridge_prob)
+
+best_coords <- coords(roc_ridge, "best", best.method = "youden",
+                      ret = c("threshold", "sensitivity", "specificity"))
+best_thresh <- best_coords["threshold"]
+best_thresh
